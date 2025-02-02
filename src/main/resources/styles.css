@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
+
+.root {
+    -fx-font-family: "Roboto", "Arial", sans-serif;
+    -fx-background-color: #ffffff;
+}
+
+.label {
+    -fx-font-size: 14px;
+    -fx-text-fill: #444;
+}
+
+.text-field {
+    -fx-pref-height: 40px;
+    -fx-font-size: 14px;
+    -fx-border-color: #ddd;
+    -fx-border-radius: 5px;
+    -fx-background-radius: 5px;
+    -fx-padding: 5px;
+}
+
+.button {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-background-color: #1976D2; /* Azul moderno */
+    -fx-text-fill: white;
+    -fx-border-radius: 5px;
+    -fx-background-radius: 5px;
+    -fx-padding: 10px 20px;
+    -fx-cursor: hand;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.2), 5, 0, 0, 2);
+}
+
+.button {
+    -fx-transition: 0.2s ease-in-out;
+}
+
+.button:hover {
+    -fx-background-color: #1565C0; /* Azul mais escuro */
+
+    -fx-scale-x: 1.1;
+    -fx-scale-y: 1.1;
+}
+
+#cancelButton {
+    -fx-background-color: #E53935; /* Vermelho */
+}
+
+#cancelButton:hover {
+    -fx-background-color: #D32F2F; /* Vermelho mais escuro */
+}
