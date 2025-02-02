@@ -11,6 +11,9 @@ public class Header {
         this.value = new SimpleStringProperty(value);
     }
 
+    public SimpleStringProperty keyProperty() { return key; }
+    public SimpleStringProperty valueProperty() { return value; }
+
     public String getKey() {
         return key.get();
     }

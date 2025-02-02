@@ -49,3 +49,39 @@
 #cancelButton:hover {
     -fx-background-color: #D32F2F; /* Vermelho mais escuro */
 }
+
+#cancelButton {
+    -fx-background-color: #ff4444;
+    -fx-text-fill: white;
+}
+
+.table-view {
+    -fx-font-size: 14px;
+}
+
+.button {
+    -fx-font-weight: bold;
+    -fx-padding: 5 10 5 10;
+}
+
+.text-field, .combo-box {
+    -fx-font-size: 14px;
+}
+
+/* Estilização da tabela de headers */
+.header-table {
+    -fx-font-size: 13px;
+}
+
+/* Estilo dos botões de ação */
+.button-small {
+    -fx-pref-width: 25px;
+    -fx-pref-height: 25px;
+    -fx-background-radius: 15px;
+    -fx-font-weight: bold;
+}
+
+/* Foco na célula editável */
+.table-row-cell:filled:focused {
+    -fx-background-color: #e0f0ff;
+}

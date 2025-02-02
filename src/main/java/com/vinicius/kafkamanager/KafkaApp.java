@@ -6,63 +6,56 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.VBox;
+import javafx.scene.input.KeyCode;
+import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 public class KafkaApp extends Application {
 
-    // Variável de controle para cancelar a conexão
     private CompletableFuture<Void> connectionFuture;
 
     @Override
     public void start(Stage primaryStage) {
         primaryStage.setTitle("Kafka Manager");
 
-        // Ícone do Kafka
         ImageView kafkaIcon = new ImageView(
                 new Image(Objects.requireNonNull(getClass().getResource("/kafka-background.png")).toExternalForm())
         );
         kafkaIcon.setFitWidth(100);
         kafkaIcon.setPreserveRatio(true);
 
-        // Campo de texto para Kafka Server
         Label kafkaLabel = new Label("Kafka Host:");
         TextField kafkaField = new TextField();
         kafkaField.setPromptText("Digite o endereço do servidor Kafka (e.g. localhost:9092)");
+        kafkaField.setText("localhost:29092");
 
-        // Botões
         Button connectButton = new Button("Conectar");
         Button cancelButton = new Button("Cancelar");
         cancelButton.setId("cancelButton");
-        cancelButton.setDisable(true); // Desativado inicialmente
+        cancelButton.setDisable(true);
 
-        // Adicionar evento para tecla Enter
         kafkaField.setOnKeyPressed(event -> {
-            switch (event.getCode()) {
-                case ENTER -> connectButton.fire();
+            if (Objects.requireNonNull(event.getCode()) == KeyCode.ENTER) {
+                connectButton.fire();
             }
         });
 
-        // Loader
         ProgressIndicator loader = new ProgressIndicator();
         loader.setVisible(false);
 
-        // Ações do botão "Conectar"
         connectButton.setOnAction(e -> {
             String kafkaServer = kafkaField.getText();
             connectButton.setDisable(true);
@@ -99,10 +92,9 @@ public class KafkaApp extends Application {
             }
         });
 
-        // Ações do botão "Cancelar"
         cancelButton.setOnAction(e -> {
             if (connectionFuture != null && !connectionFuture.isDone()) {
-                connectionFuture.cancel(true); // Cancela a conexão em andamento
+                connectionFuture.cancel(true);
             }
             connectButton.setDisable(false);
             cancelButton.setDisable(true);
@@ -110,7 +102,6 @@ public class KafkaApp extends Application {
             showAlert(Alert.AlertType.INFORMATION, "Cancelado", "Tentativa de conexão cancelada.");
         });
 
-        // Layout
         HBox buttonBox = new HBox(15, connectButton, cancelButton, loader);
         buttonBox.setAlignment(Pos.CENTER);
 
@@ -124,46 +115,36 @@ public class KafkaApp extends Application {
         primaryStage.show();
     }
 
-    // Função para abrir a lista de tópicos
     private void openTopicListView(String kafkaServer, Stage primaryStage) {
         BorderPane layout = new BorderPane();
 
-        // Menu Superior (Horizontal)
         HBox menu = new HBox(10);
         menu.setPadding(new Insets(10));
         menu.setStyle("-fx-background-color: #f0f0f0;");
         menu.setAlignment(Pos.CENTER_LEFT);
 
-// Botões de Tópicos e Producers
         Button topicsButton = new Button("Tópicos");
         Button producersButton = new Button("Producers");
         Button exitButton = new Button("Sair");
         exitButton.setStyle("-fx-background-color: red; -fx-text-fill: white;");
         exitButton.setOnAction(e -> primaryStage.close());
 
-// Alinhar os botões "Tópicos" e "Producers" à esquerda
         menu.getChildren().addAll(topicsButton, producersButton);
 
-// Alinhar o botão "Sair" à direita
         HBox rightSide = new HBox(exitButton);
         rightSide.setAlignment(Pos.CENTER_RIGHT);
-        menu.getChildren().add(rightSide);  // Coloca o "Sair" na parte direita
+        menu.getChildren().add(rightSide);
 
-        // Layout do topo
         layout.setTop(menu);
 
-        // Placeholder inicial
         Label placeholderLabel = new Label("Selecione uma opção no menu.");
         placeholderLabel.setStyle("-fx-font-size: 16; -fx-text-fill: gray;");
         layout.setCenter(placeholderLabel);
 
-        // Ação do botão Tópicos
         topicsButton.setOnAction(e -> showTopicsView(kafkaServer, layout));
 
-        // Ação do botão Producers
         producersButton.setOnAction(e -> showProducersForm(kafkaServer, layout));
 
-        // Rodapé
         Label footerLabel = new Label("Conectado ao host: " + kafkaServer);
         footerLabel.setStyle("-fx-text-fill: black;");
 
@@ -172,20 +153,15 @@ public class KafkaApp extends Application {
         footer.setStyle("-fx-background-color: #ddd;");
         footer.setAlignment(Pos.CENTER_LEFT);
 
-        // Garantir que os elementos fiquem alinhados corretamente
         HBox.setHgrow(footerLabel, Priority.ALWAYS);
         footer.setAlignment(Pos.CENTER_LEFT);
 
         layout.setBottom(footer);
 
-        // Cena principal
         Scene scene = new Scene(layout, 800, 600);
         primaryStage.setScene(scene);
     }
 
-
-
-    // Função para testar a conexão com o Kafka
     private boolean testKafkaConnection(String kafkaServer) {
         Properties props = new Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaServer);
@@ -199,12 +175,9 @@ public class KafkaApp extends Application {
         }
     }
 
-    // Exibir Tópicos
-    // Exibir Tópicos
     private void showTopicsView(String kafkaServer, BorderPane layout) {
         TableView<TopicInfo> table = new TableView<>();
 
-        // Configurar colunas da tabela
         TableColumn<TopicInfo, String> nameCol = new TableColumn<>("Tópico");
         nameCol.setCellValueFactory(data -> data.getValue().name());
 
@@ -224,29 +197,28 @@ public class KafkaApp extends Application {
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         table.setStyle("-fx-font-size: 14px;");
 
-        // Label de carregamento
         Label loadingLabel = new Label("Carregando dados...");
         loadingLabel.setStyle("-fx-font-size: 14px; -fx-text-fill: gray;");
 
-        // Botão de atualizar
         Button refreshButton = new Button("Atualizar");
         refreshButton.setOnAction(e -> loadTopics(kafkaServer, table, loadingLabel));
 
-        // Layout para o botão de atualizar e a tabela
-        VBox vbox = new VBox(10, refreshButton, table);
+        HBox topicsButtons = new HBox(10);
+        Button createTopicButton = new Button("Criar Tópico");
+        createTopicButton.setOnAction(e -> showCreateTopicDialog(kafkaServer, table));
+        topicsButtons.getChildren().addAll(refreshButton, createTopicButton);
+
+        VBox vbox = new VBox(10, topicsButtons, table);
         vbox.setPadding(new Insets(10));
 
-        // Layout principal
         layout.setCenter(vbox);
 
-        // Carregar os tópicos inicialmente
         loadTopics(kafkaServer, table, loadingLabel);
     }
 
-    // Função para carregar tópicos
     private void loadTopics(String kafkaServer, TableView<TopicInfo> table, Label loadingLabel) {
-        table.getItems().clear(); // Limpa a tabela antes de carregar novos dados
-        table.setPlaceholder(loadingLabel); // Mostra o label enquanto carrega os dados
+        table.getItems().clear();
+        table.setPlaceholder(loadingLabel);
 
         CompletableFuture.runAsync(() -> {
             List<TopicInfo> topics = fetchTopicDetails(kafkaServer);
@@ -261,87 +233,139 @@ public class KafkaApp extends Application {
         });
     }
 
+    private void showCreateTopicDialog(String kafkaServer, TableView<TopicInfo> table) {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Criar Novo Tópico");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+
+        TextField nameField = new TextField();
+        TextField partitionsField = new TextField();
+        TextField replicationField = new TextField();
+
+        grid.addRow(0, new Label("Nome:"), nameField);
+        grid.addRow(1, new Label("Partições:"), partitionsField);
+        grid.addRow(2, new Label("Fator de Replicação:"), replicationField);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        Optional<ButtonType> result = dialog.showAndWait();
+        result.ifPresent(buttonType -> {
+            if (buttonType == ButtonType.OK) {
+                createTopic(
+                        kafkaServer,
+                        nameField.getText(),
+                        partitionsField.getText(),
+                        replicationField.getText(),
+                        table
+                );
+            }
+        });
+    }
 
 
-    // Exibir Formulário de Producers
+    private void createTopic(String kafkaServer, String name, String partitionsStr, String replicationStr, TableView<TopicInfo> table) {
+        try {
+            int partitions = Integer.parseInt(partitionsStr);
+            short replication = Short.parseShort(replicationStr);
+
+            Properties props = new Properties();
+            props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaServer);
+
+            try (Admin admin = Admin.create(props)) {
+                admin.createTopics(Collections.singletonList(
+                        new NewTopic(name, partitions, replication)
+                )).all().get(10, TimeUnit.SECONDS);
+
+                loadTopics(kafkaServer, table, new Label());
+                showAlert(Alert.AlertType.INFORMATION, "Sucesso", "Tópico criado com sucesso!");
+            }
+        } catch (Exception e) {
+            showAlert(Alert.AlertType.ERROR, "Erro", "Falha ao criar tópico: " + e.getMessage());
+        }
+    }
+
     private void showProducersForm(String kafkaServer, BorderPane layout) {
         VBox form = new VBox(10);
         form.setPadding(new Insets(10));
 
-        // Combobox para selecionar o tópico
         Label topicLabel = new Label("Selecione o Tópico:");
         ComboBox<String> topicComboBox = new ComboBox<>();
-        topicComboBox.setEditable(true); // Permite a digitação para filtro
+        topicComboBox.setEditable(true);
 
-        // Carregar os tópicos do Kafka
         CompletableFuture.runAsync(() -> {
             List<String> topics = fetchTopics(kafkaServer);
             Platform.runLater(() -> topicComboBox.getItems().addAll(topics));
         });
 
-        topicComboBox.setMaxWidth(Double.MAX_VALUE);  // Ocupa 200% do width
+        topicComboBox.setMaxWidth(Double.MAX_VALUE);
 
-        // Campo de texto para "Chave"
         Label keyLabel = new Label("Chave:");
         TextField keyField = new TextField();
         keyField.setPromptText("Digite a chave (opcional)");
-        keyField.setMaxWidth(Double.MAX_VALUE);  // Ocupa 100% do width
+        keyField.setMaxWidth(Double.MAX_VALUE);
 
-        // Campo de texto para "Valor" (JSON)
         Label valueLabel = new Label("Valor:");
         TextArea valueArea = new TextArea();
         valueArea.setPromptText("Digite o valor em JSON");
-        valueArea.setMaxWidth(Double.MAX_VALUE);  // Ocupa 100% do width
+        valueArea.setMaxWidth(Double.MAX_VALUE);
 
-        // Tabela para os Headers (HashMap<String, String>)
         Label headersLabel = new Label("Headers:");
         TableView<Header> headersTable = new TableView<>();
 
-        // Configurar a tabela de headers para permitir edição
         TableColumn<Header, String> headerKeyColumn = new TableColumn<>("Chave");
-        headerKeyColumn.setCellValueFactory(data -> data.getValue().key());
-        headerKeyColumn.setCellFactory(TextFieldTableCell.forTableColumn()); // Permitir edição
-        headerKeyColumn.setOnEditCommit(event -> {
-            Header header = event.getRowValue();
-            header.setKey(event.getNewValue()); // Atualiza a chave no modelo
-        });
+        headerKeyColumn.setCellValueFactory(data -> data.getValue().keyProperty());
+        headerKeyColumn.setCellFactory(column -> new AutoCommitTextFieldTableCell<>());
+        headerKeyColumn.prefWidthProperty().bind(headersTable.widthProperty().multiply(0.5));
 
         TableColumn<Header, String> headerValueColumn = new TableColumn<>("Valor");
-        headerValueColumn.setCellValueFactory(data -> data.getValue().value());
-        headerValueColumn.setCellFactory(TextFieldTableCell.forTableColumn()); // Permitir edição
-        headerValueColumn.setOnEditCommit(event -> {
-            Header header = event.getRowValue();
-            header.setValue(event.getNewValue()); // Atualiza o valor no modelo
-        });
+        headerValueColumn.setCellValueFactory(data -> data.getValue().valueProperty());
+        headerValueColumn.setCellFactory(column -> new AutoCommitTextFieldTableCell<>());
+        headerValueColumn.prefWidthProperty().bind(headersTable.widthProperty().multiply(0.5));
 
-        // Permitir que a tabela seja editável
+        headersTable.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+
+        Button addHeaderButton = new Button("+");
+        Button removeHeaderButton = new Button("-");
+
         headersTable.setEditable(true);
         headersTable.getColumns().addAll(headerKeyColumn, headerValueColumn);
-        headersTable.setMaxWidth(Double.MAX_VALUE);  // Ocupa 100% do width
 
-        // Botões para adicionar/remover Headers
-        HBox headersButtons = new HBox(10);
-        Button addHeaderButton = new Button("Adicionar Header");
-        Button removeHeaderButton = new Button("Remover Header");
+        addHeaderButton.setStyle("-fx-font-weight: bold; -fx-min-width: 25; -fx-min-height: 25;");
+        removeHeaderButton.setStyle("-fx-font-weight: bold; -fx-min-width: 25; -fx-min-height: 25; -fx-background-color: #ff6666;");
+        headersTable.setStyle("-fx-selection-bar: #e0f0ff; -fx-selection-bar-non-focused: #f0f0f0;");
 
-        // Ação do botão "Adicionar Header"
         addHeaderButton.setOnAction(e -> {
-            // Adicionar um novo Header com valores vazios
-            headersTable.getItems().add(new Header("", ""));
+            Header newHeader = new Header("", "");
+            headersTable.getItems().add(newHeader);
+
+            Platform.runLater(() -> {
+                int lastIndex = headersTable.getItems().size() - 1;
+
+                headersTable.getSelectionModel().select(lastIndex);
+                headersTable.scrollTo(lastIndex);
+
+                TablePosition<Header, ?> pos = new TablePosition<>(headersTable, lastIndex, headerKeyColumn);
+                headersTable.getFocusModel().focus(pos.getRow(), pos.getTableColumn());
+
+                headersTable.edit(pos.getRow(), pos.getTableColumn());
+            });
         });
 
-        // Ação do botão "Remover Header"
+        HBox headersButtons = new HBox(5, addHeaderButton, removeHeaderButton);
+        headersButtons.setAlignment(Pos.CENTER_LEFT);
+        headersButtons.setPadding(new Insets(5, 0, 5, 0));
+
         removeHeaderButton.setOnAction(e -> {
-            // Remover o Header selecionado
             Header selectedHeader = headersTable.getSelectionModel().getSelectedItem();
             if (selectedHeader != null) {
                 headersTable.getItems().remove(selectedHeader);
             }
         });
 
-        headersButtons.getChildren().addAll(addHeaderButton, removeHeaderButton);
-
-        // Botão para enviar a mensagem
         Button sendButton = new Button("Enviar");
         sendButton.setOnAction(e -> {
             String topic = topicComboBox.getValue();
@@ -357,13 +381,11 @@ public class KafkaApp extends Application {
                 return;
             }
 
-            // Converter headers em HashMap
             Map<String, String> headers = new HashMap<>();
             for (Header header : headersTable.getItems()) {
                 headers.put(header.getKey(), header.getValue());
             }
 
-            // Enviar a mensagem
             CompletableFuture.runAsync(() -> {
                 boolean success = sendMessage(kafkaServer, topic, key, value, headers);
                 Platform.runLater(() -> {
@@ -383,7 +405,7 @@ public class KafkaApp extends Application {
                 topicLabel, topicComboBox,
                 keyLabel, keyField,
                 valueLabel, valueArea,
-                headersLabel, headersTable, headersButtons,
+                headersLabel, headersButtons, headersTable,
                 sendButton
         );
 
@@ -391,7 +413,6 @@ public class KafkaApp extends Application {
     }
 
 
-    // Função para buscar detalhes dos tópicos
     private List<TopicInfo> fetchTopicDetails(String kafkaServer) {
         Properties props = new Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaServer);
@@ -403,11 +424,11 @@ public class KafkaApp extends Application {
                     .get()
                     .forEach((name, desc) -> {
                         int partitions = desc.partitions().size();
-                        int replicationFactor = desc.partitions().get(0).replicas().size(); // Fator de replicação assumido igual para todas as partições
-                        long messageCount = calculateMessageCount(kafkaServer, name); // Calcula o número de mensagens
+                        int replicationFactor = desc.partitions().getFirst().replicas().size();
+                        long messageCount = calculateMessageCount(kafkaServer, name);
                         int totalInSyncReplicas = desc.partitions().stream()
                                 .mapToInt(p -> p.isr().size())
-                                .sum(); // Soma de réplicas em sincronização
+                                .sum();
 
                         topics.add(new TopicInfo(name, partitions, replicationFactor, messageCount, String.valueOf(totalInSyncReplicas)));
                     });
@@ -430,13 +451,10 @@ public class KafkaApp extends Application {
                     .map(p -> new org.apache.kafka.common.TopicPartition(topic, p.partition()))
                     .toList();
 
-            // Busca os offsets finais
             Map<org.apache.kafka.common.TopicPartition, Long> endOffsets = consumer.endOffsets(partitions);
 
-            // Busca os offsets iniciais
             Map<org.apache.kafka.common.TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(partitions);
 
-            // Calcula a soma das diferenças (número total de mensagens)
             return partitions.stream()
                     .mapToLong(partition -> endOffsets.get(partition) - beginningOffsets.get(partition))
                     .sum();
@@ -446,15 +464,18 @@ public class KafkaApp extends Application {
         }
     }
 
-    // Função para enviar mensagem
-    private boolean sendMessage(String kafkaServer, String topic, String message, String value, Map<String, String> headers) {
+    private boolean sendMessage(String kafkaServer, String topic, String key, String value, Map<String, String> headers) {
         Properties props = new Properties();
         props.put("bootstrap.servers", kafkaServer);
         props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
         props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
 
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(props)) {
-            producer.send(new ProducerRecord<>(topic, message));
+            ProducerRecord<String, String> record = new ProducerRecord<>(topic, key, value);
+
+            headers.forEach((k, v) -> record.headers().add(k, v.getBytes(StandardCharsets.UTF_8)));
+
+            producer.send(record);
             return true;
         } catch (Exception e) {
             return false;
@@ -462,7 +483,6 @@ public class KafkaApp extends Application {
     }
 
 
-    // Função para buscar os tópicos do Kafka
     private List<String> fetchTopics(String kafkaServer) {
         Properties props = new Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaServer);
@@ -475,7 +495,6 @@ public class KafkaApp extends Application {
         }
     }
 
-    // Função para exibir alertas
     private void showAlert(Alert.AlertType type, String title, String message) {
         Alert alert = new Alert(type);
         alert.setTitle(title);
