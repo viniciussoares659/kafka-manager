@@ -1,5 +1,6 @@
 package com.vinicius.kafkamanager;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
@@ -16,6 +17,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import javafx.util.StringConverter;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -24,6 +26,8 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -31,6 +35,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class KafkaApp extends Application {
+
+    private static final String CONFIG_FILE = "producer_configs.json";
 
     private CompletableFuture<Void> connectionFuture;
 
@@ -440,12 +446,98 @@ public class KafkaApp extends Application {
         });
 
         valueArea.setPromptText("Digite o valor em JSON");
-
         HBox jsonTools = getHBox(valueArea);
-
         VBox valueBox = new VBox(5, valueLabel, valueArea, jsonTools);
 
+        // Novo componente para histórico
+        ComboBox<ProducerConfig> configCombo = new ComboBox<>();
+        configCombo.setPromptText("Selecione uma configuração salva");
+        configCombo.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(ProducerConfig config) {
+                return config != null ? config.getName() : "";
+            }
+
+            @Override
+            public ProducerConfig fromString(String string) {
+                return null;
+            }
+        });
+
+        Button saveConfigButton = new Button("Salvar Configuração");
+        Button deleteConfigButton = new Button("Excluir");
+
+        HBox configTools = new HBox(10, configCombo, saveConfigButton, deleteConfigButton);
+
+        saveConfigButton.setOnAction(e -> {
+            TextInputDialog dialog = new TextInputDialog("Nova Configuração");
+            dialog.setTitle("Salvar Configuração");
+            dialog.setHeaderText("Digite um nome para esta configuração:");
+
+            Optional<String> result = dialog.showAndWait();
+            result.ifPresent(name -> {
+                ProducerConfig config = new ProducerConfig(
+                        name,
+                        topicComboBox.getValue(),
+                        keyField.getText(),
+                        valueArea.getText(),
+                        new HashMap<>()
+                );
+
+                headersTable.getItems().forEach(header ->
+                        config.getHeaders().put(header.getKey(), header.getValue())
+                );
+
+                configCombo.getItems().add(config);
+                saveConfigToFile(config);
+            });
+        });
+        
+        configCombo.setOnAction(e -> {
+            ProducerConfig config = configCombo.getSelectionModel().getSelectedItem();
+            if (config != null) {
+                topicComboBox.setValue(config.getTopic());
+                keyField.setText(config.getKey());
+                valueArea.setText(config.getValueTemplate());
+
+                headersTable.getItems().clear();
+                config.getHeaders().forEach((k, v) ->
+                        headersTable.getItems().add(new Header(k, v))
+                );
+            }
+        });
+
+        configCombo.setCellFactory(lv -> {
+            ListCell<ProducerConfig> cell = new ListCell<>();
+            ContextMenu contextMenu = new ContextMenu();
+
+            MenuItem editItem = new MenuItem("Editar");
+            editItem.setOnAction(event -> {
+                ProducerConfig config = cell.getItem();
+                openConfigEditor(config);
+            });
+
+            MenuItem deleteItem = new MenuItem("Excluir");
+            deleteItem.setOnAction(event -> {
+                ProducerConfig config = cell.getItem();
+                configCombo.getItems().remove(config);
+                deleteConfigFromFile(config);
+            });
+
+            contextMenu.getItems().addAll(editItem, deleteItem);
+
+            cell.emptyProperty().addListener((obs, wasEmpty, isNowEmpty) -> {
+                if (isNowEmpty) {
+                    cell.setContextMenu(null);
+                } else {
+                    cell.setContextMenu(contextMenu);
+                }
+            });
+            return cell;
+        });
+
         form.getChildren().addAll(
+                configTools,
                 topicLabel, topicComboBox,
                 keyLabel, keyField,
                 valueBox,
@@ -454,6 +546,12 @@ public class KafkaApp extends Application {
         );
 
         layout.setCenter(form);
+    }
+
+    private void deleteConfigFromFile(ProducerConfig config) {
+    }
+
+    private void openConfigEditor(ProducerConfig config) {
     }
 
     private HBox getHBox(TextArea valueArea) {
@@ -580,6 +678,39 @@ public class KafkaApp extends Application {
                         "-fx-text-fill: orange;");
             });
         });
+    }
+
+    private void saveConfigToFile(ProducerConfig config) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            List<ProducerConfig> configs = loadAllConfigs();
+            configs.add(config);
+
+            mapper.writeValue(new File(CONFIG_FILE), configs);
+        } catch (IOException ex) {
+            showAlert(Alert.AlertType.ERROR, "Erro", "Falha ao salvar configuração");
+        }
+    }
+
+    private List<ProducerConfig> loadAllConfigs() {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            File file = new File(CONFIG_FILE);
+
+            if (file.exists()) {
+                return mapper.readValue(file,
+                        new TypeReference<>() {
+                        });
+            }
+        } catch (IOException ex) {
+            // Arquivo corrompido ou inexistente
+        }
+        return new ArrayList<>();
+    }
+
+    private void initializeProducerConfigs(ComboBox<ProducerConfig> configCombo) {
+        List<ProducerConfig> configs = loadAllConfigs();
+        configCombo.getItems().addAll(configs);
     }
 
     public static void main(String[] args) {
