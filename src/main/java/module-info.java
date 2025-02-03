@@ -3,6 +3,7 @@ module com.vinicius.kafkamanager {
     requires javafx.fxml;
     requires kafka.clients;
     requires static lombok;
+    requires com.fasterxml.jackson.databind;
 
 
     opens com.vinicius.kafkamanager to javafx.fxml;

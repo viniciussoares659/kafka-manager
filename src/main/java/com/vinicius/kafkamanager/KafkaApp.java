@@ -1,5 +1,9 @@
 package com.vinicius.kafkamanager;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -11,21 +15,34 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class KafkaApp extends Application {
 
     private CompletableFuture<Void> connectionFuture;
+
+    @Override
+    public void init() {
+        KafkaConnectionPool.startHealthCheck(120);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            KafkaConnectionPool.shutdown();
+            System.out.println("Conexões e scheduler foram encerrados");
+        }));
+    }
 
     @Override
     public void start(Stage primaryStage) {
@@ -148,7 +165,18 @@ public class KafkaApp extends Application {
         Label footerLabel = new Label("Conectado ao host: " + kafkaServer);
         footerLabel.setStyle("-fx-text-fill: black;");
 
-        HBox footer = new HBox(10, footerLabel);
+        Label statusLabel = new Label();
+        statusLabel.setStyle("-fx-text-fill: green;");
+        updateConnectionStatus(kafkaServer, statusLabel);
+
+        HBox footer = new HBox(10, footerLabel, statusLabel);
+
+        Timeline timeline = new Timeline(
+                new KeyFrame(Duration.seconds(30),
+                        e -> updateConnectionStatus(kafkaServer, statusLabel))
+        );
+        timeline.setCycleCount(Animation.INDEFINITE);
+        timeline.play();
         footer.setPadding(new Insets(10));
         footer.setStyle("-fx-background-color: #ddd;");
         footer.setAlignment(Pos.CENTER_LEFT);
@@ -163,10 +191,8 @@ public class KafkaApp extends Application {
     }
 
     private boolean testKafkaConnection(String kafkaServer) {
-        Properties props = new Properties();
-        props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaServer);
-
-        try (Admin admin = Admin.create(props)) {
+        try {
+            Admin admin = KafkaConnectionPool.getAdminClient(kafkaServer);
             admin.describeCluster().nodes().get(10, TimeUnit.SECONDS);
             return true;
         } catch (Exception e) {
@@ -245,6 +271,18 @@ public class KafkaApp extends Application {
         TextField partitionsField = new TextField();
         TextField replicationField = new TextField();
 
+        partitionsField.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (!newVal.matches("\\d*")) {
+                partitionsField.setText(newVal.replaceAll("[^\\d]", ""));
+            }
+        });
+
+        replicationField.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (!newVal.matches("\\d*")) {
+                replicationField.setText(newVal.replaceAll("[^\\d]", ""));
+            }
+        });
+
         grid.addRow(0, new Label("Nome:"), nameField);
         grid.addRow(1, new Label("Partições:"), partitionsField);
         grid.addRow(2, new Label("Fator de Replicação:"), replicationField);
@@ -265,7 +303,6 @@ public class KafkaApp extends Application {
             }
         });
     }
-
 
     private void createTopic(String kafkaServer, String name, String partitionsStr, String replicationStr, TableView<TopicInfo> table) {
         try {
@@ -307,6 +344,7 @@ public class KafkaApp extends Application {
         TextField keyField = new TextField();
         keyField.setPromptText("Digite a chave (opcional)");
         keyField.setMaxWidth(Double.MAX_VALUE);
+        keyField.setTooltip(new Tooltip("Chave opcional para particionamento"));
 
         Label valueLabel = new Label("Valor:");
         TextArea valueArea = new TextArea();
@@ -401,15 +439,40 @@ public class KafkaApp extends Application {
             });
         });
 
+        valueArea.setPromptText("Digite o valor em JSON");
+
+        HBox jsonTools = getHBox(valueArea);
+
+        VBox valueBox = new VBox(5, valueLabel, valueArea, jsonTools);
+
         form.getChildren().addAll(
                 topicLabel, topicComboBox,
                 keyLabel, keyField,
-                valueLabel, valueArea,
+                valueBox,
                 headersLabel, headersButtons, headersTable,
                 sendButton
         );
 
         layout.setCenter(form);
+    }
+
+    private HBox getHBox(TextArea valueArea) {
+        Button formatJsonButton = new Button("Formatar");
+        formatJsonButton.setTooltip(new Tooltip("Formatar e validar JSON"));
+        formatJsonButton.setOnAction(e -> {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                Object json = mapper.readValue(valueArea.getText(), Object.class);
+                String prettyJson = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(json);
+                valueArea.setText(prettyJson);
+            } catch (Exception ex) {
+                showAlert(Alert.AlertType.ERROR, "JSON Inválido", "O texto não é um JSON válido");
+            }
+        });
+
+        HBox jsonTools = new HBox(5, formatJsonButton);
+        jsonTools.setAlignment(Pos.CENTER_RIGHT);
+        return jsonTools;
     }
 
 
@@ -440,48 +503,43 @@ public class KafkaApp extends Application {
     }
 
     private long calculateMessageCount(String kafkaServer, String topic) {
-        Properties consumerProps = new Properties();
-        consumerProps.put("bootstrap.servers", kafkaServer);
-        consumerProps.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-        consumerProps.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-        consumerProps.put("group.id", "kafka-manager-group");
+        try (KafkaConsumer<Object, Object> consumer =
+                     KafkaConnectionPool.getConsumer(kafkaServer, "kafka-manager-temp-group")) {
 
-        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProps)) {
-            List<org.apache.kafka.common.TopicPartition> partitions = consumer.partitionsFor(topic).stream()
-                    .map(p -> new org.apache.kafka.common.TopicPartition(topic, p.partition()))
-                    .toList();
+            List<TopicPartition> partitions = consumer.partitionsFor(topic).stream()
+                    .map(p -> new TopicPartition(topic, p.partition()))
+                    .collect(Collectors.toList());
 
-            Map<org.apache.kafka.common.TopicPartition, Long> endOffsets = consumer.endOffsets(partitions);
-
-            Map<org.apache.kafka.common.TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(partitions);
+            Map<TopicPartition, Long> endOffsets = consumer.endOffsets(partitions);
+            Map<TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(partitions);
 
             return partitions.stream()
-                    .mapToLong(partition -> endOffsets.get(partition) - beginningOffsets.get(partition))
+                    .mapToLong(p -> endOffsets.get(p) - beginningOffsets.get(p))
                     .sum();
         } catch (Exception e) {
-            Platform.runLater(() -> showAlert(Alert.AlertType.ERROR, "Erro", "Falha ao calcular o número de mensagens para o tópico: " + topic));
             return 0;
         }
     }
 
     private boolean sendMessage(String kafkaServer, String topic, String key, String value, Map<String, String> headers) {
-        Properties props = new Properties();
-        props.put("bootstrap.servers", kafkaServer);
-        props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        try {
+            if (!isConnectionHealthy(kafkaServer)) {
+                showAlert(Alert.AlertType.ERROR, "Conexão Inativa", "Reconectando ao servidor...");
+                KafkaConnectionPool.getAdminClient(kafkaServer).close(); // Força renovação
+            }
+            KafkaProducer<Object, Object> producer = KafkaConnectionPool.getProducer(kafkaServer);
+            ProducerRecord<Object, Object> record = new ProducerRecord<>(topic, key, value);
 
-        try (KafkaProducer<String, String> producer = new KafkaProducer<>(props)) {
-            ProducerRecord<String, String> record = new ProducerRecord<>(topic, key, value);
+            headers.forEach((k, v) ->
+                    record.headers().add(k, v.getBytes(StandardCharsets.UTF_8))
+            );
 
-            headers.forEach((k, v) -> record.headers().add(k, v.getBytes(StandardCharsets.UTF_8)));
-
-            producer.send(record);
+            producer.send(record).get(5, TimeUnit.SECONDS);
             return true;
         } catch (Exception e) {
             return false;
         }
     }
-
 
     private List<String> fetchTopics(String kafkaServer) {
         Properties props = new Properties();
@@ -500,6 +558,28 @@ public class KafkaApp extends Application {
         alert.setTitle(title);
         alert.setContentText(message);
         alert.showAndWait();
+    }
+
+    private boolean isConnectionHealthy(String bootstrapServers) {
+        try {
+            Admin admin = KafkaConnectionPool.getAdminClient(bootstrapServers);
+            admin.describeCluster().nodes().get(5, TimeUnit.SECONDS);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void updateConnectionStatus(String kafkaServer, Label statusLabel) {
+        CompletableFuture.runAsync(() -> {
+            boolean isHealthy = isConnectionHealthy(kafkaServer);
+            Platform.runLater(() -> {
+                statusLabel.setText(isHealthy ? "✔ Conectado" : "⚠ Conexão Instável");
+                statusLabel.setStyle(isHealthy ?
+                        "-fx-text-fill: green;" :
+                        "-fx-text-fill: orange;");
+            });
+        });
     }
 
     public static void main(String[] args) {
