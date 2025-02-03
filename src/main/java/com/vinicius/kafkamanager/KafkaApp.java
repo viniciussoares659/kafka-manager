@@ -13,6 +13,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
@@ -449,9 +450,14 @@ public class KafkaApp extends Application {
         HBox jsonTools = getHBox(valueArea);
         VBox valueBox = new VBox(5, valueLabel, valueArea, jsonTools);
 
-        // Novo componente para histórico
+
+        ProgressIndicator loadingIndicator = new ProgressIndicator();
+        loadingIndicator.setVisible(false);
         ComboBox<ProducerConfig> configCombo = new ComboBox<>();
-        configCombo.setPromptText("Selecione uma configuração salva");
+        configCombo.setPlaceholder(new Label("Nenhuma configuração salva"));
+
+        initializeProducerConfigs(configCombo, loadingIndicator);
+
         configCombo.setConverter(new StringConverter<>() {
             @Override
             public String toString(ProducerConfig config) {
@@ -466,8 +472,37 @@ public class KafkaApp extends Application {
 
         Button saveConfigButton = new Button("Salvar Configuração");
         Button deleteConfigButton = new Button("Excluir");
+        TextField searchField = new TextField();
+        searchField.setPromptText("Buscar configuração...");
+        searchField.textProperty().addListener((obs, oldVal, newVal) -> {
+            configCombo.getItems().setAll(loadAllConfigs().stream()
+                    .filter(config -> config.getName().toLowerCase().contains(newVal.toLowerCase()))
+                    .collect(Collectors.toList()));
+        });
 
-        HBox configTools = new HBox(10, configCombo, saveConfigButton, deleteConfigButton);
+        configCombo.addEventHandler(ContextMenuEvent.CONTEXT_MENU_REQUESTED, e -> {
+            if (!configCombo.getSelectionModel().isEmpty()) {
+                ContextMenu contextMenu = new ContextMenu();
+
+                MenuItem editItem = new MenuItem("Editar");
+                editItem.setOnAction(event ->
+                        openConfigEditor(configCombo.getSelectionModel().getSelectedItem())
+                );
+
+                MenuItem deleteItem = new MenuItem("Excluir");
+                deleteItem.setOnAction(event -> {
+                    ProducerConfig config = configCombo.getSelectionModel().getSelectedItem();
+                    deleteConfigFromFile(config);
+                    configCombo.getItems().remove(config);
+                });
+
+                contextMenu.getItems().addAll(editItem, deleteItem);
+                contextMenu.show(configCombo, e.getScreenX(), e.getScreenY());
+            }
+            e.consume();
+        });
+
+        HBox configTools = new HBox(10, searchField, configCombo, loadingIndicator, saveConfigButton, deleteConfigButton);
 
         saveConfigButton.setOnAction(e -> {
             TextInputDialog dialog = new TextInputDialog("Nova Configuração");
@@ -508,32 +543,84 @@ public class KafkaApp extends Application {
         });
 
         configCombo.setCellFactory(lv -> {
-            ListCell<ProducerConfig> cell = new ListCell<>();
-            ContextMenu contextMenu = new ContextMenu();
+            ListCell<ProducerConfig> cell = new ListCell<ProducerConfig>() {
+                private final ContextMenu contextMenu = new ContextMenu();
+                private final MenuItem editItem = new MenuItem("Editar");
+                private final MenuItem deleteItem = new MenuItem("Excluir");
 
-            MenuItem editItem = new MenuItem("Editar");
-            editItem.setOnAction(event -> {
-                ProducerConfig config = cell.getItem();
-                openConfigEditor(config);
-            });
+                {
+                    editItem.setOnAction(e -> openConfigEditor(getItem()));
+                    deleteItem.setOnAction(e -> {
+                        deleteConfigFromFile(getItem());
+                        configCombo.getItems().remove(getItem());
+                    });
 
-            MenuItem deleteItem = new MenuItem("Excluir");
-            deleteItem.setOnAction(event -> {
-                ProducerConfig config = cell.getItem();
-                configCombo.getItems().remove(config);
-                deleteConfigFromFile(config);
-            });
+                    contextMenu.getItems().addAll(editItem, deleteItem);
+                }
 
-            contextMenu.getItems().addAll(editItem, deleteItem);
+                @Override
+                protected void updateItem(ProducerConfig config, boolean empty) {
+                    super.updateItem(config, empty);
+
+                    if (empty || config == null) {
+                        setText(null);
+                        setGraphic(null);
+                        setContextMenu(null);
+                    } else {
+                        HBox cellContent = new HBox(5);
+
+                        ImageView icon = new ImageView(new Image(getClass().getResourceAsStream("/config-icon.png")));
+                        icon.setFitWidth(16);
+                        icon.setFitHeight(16);
+
+                        VBox labels = new VBox(
+                                new Label(config.getName()),
+                                new Label("Tópico: " + config.getTopic())
+                        );
+                        labels.setStyle("-fx-spacing: 2;");
+
+                        cellContent.getChildren().addAll(icon, labels);
+                        setGraphic(cellContent);
+                        setContextMenu(contextMenu);
+                    }
+                }
+            };
 
             cell.emptyProperty().addListener((obs, wasEmpty, isNowEmpty) -> {
                 if (isNowEmpty) {
                     cell.setContextMenu(null);
                 } else {
-                    cell.setContextMenu(contextMenu);
+                    cell.setContextMenu(cell.getContextMenu());
                 }
             });
+
             return cell;
+        });
+
+        configCombo.setButtonCell(new ListCell<ProducerConfig>() {
+            @Override
+            protected void updateItem(ProducerConfig config, boolean empty) {
+                super.updateItem(config, empty);
+
+                if (empty || config == null) {
+                    setText(null);
+                    setGraphic(null);
+                } else {
+                    HBox cellContent = new HBox(5);
+
+                    // Ícone menor
+                    ImageView icon = new ImageView(new Image(getClass().getResourceAsStream("/config-icon.png")));
+                    icon.setFitWidth(12);
+                    icon.setFitHeight(12);
+
+                    // Label principal
+                    Label nameLabel = new Label(config.getName());
+                    nameLabel.setStyle("-fx-font-weight: bold;");
+
+                    cellContent.getChildren().addAll(icon, nameLabel);
+                    setGraphic(cellContent);
+                }
+            }
         });
 
         form.getChildren().addAll(
@@ -549,9 +636,100 @@ public class KafkaApp extends Application {
     }
 
     private void deleteConfigFromFile(ProducerConfig config) {
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmation.setTitle("Confirmar Exclusão");
+        confirmation.setHeaderText("Excluir configuração: " + config.getName());
+        confirmation.setContentText("Esta ação é permanente. Continuar?");
+
+        Optional<ButtonType> result = confirmation.showAndWait();
+        if (result.isPresent() && result.get() == ButtonType.OK) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                List<ProducerConfig> configs = loadAllConfigs();
+                configs.removeIf(c -> c.getName().equals(config.getName()));
+
+                mapper.writeValue(new File(CONFIG_FILE), configs);
+            } catch (IOException ex) {
+                showAlert(Alert.AlertType.ERROR, "Erro", "Falha ao excluir configuração");
+            }
+        }
     }
 
     private void openConfigEditor(ProducerConfig config) {
+        Dialog<ProducerConfig> dialog = new Dialog<>();
+        dialog.setTitle("Editar Configuração");
+        dialog.setHeaderText("Editando: " + config.getName());
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+
+        TextField nameField = new TextField(config.getName());
+        TextField topicField = new TextField(config.getTopic());
+        TextField keyField = new TextField(config.getKey());
+        TextArea valueArea = new TextArea(config.getValueTemplate());
+
+        TableView<Header> headersTable = createHeadersTable(config.getHeaders());
+
+        grid.addRow(0, new Label("Nome:"), nameField);
+        grid.addRow(1, new Label("Tópico:"), topicField);
+        grid.addRow(2, new Label("Chave:"), keyField);
+        grid.addRow(3, new Label("Valor:"), valueArea);
+        grid.addRow(4, new Label("Headers:"), headersTable);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.setResultConverter(buttonType -> {
+            if (buttonType == ButtonType.OK) {
+                config.setName(nameField.getText());
+                config.setTopic(topicField.getText());
+                config.setKey(keyField.getText());
+                config.setValueTemplate(valueArea.getText());
+
+                Map<String, String> newHeaders = new HashMap<>();
+                headersTable.getItems().forEach(header ->
+                        newHeaders.put(header.getKey(), header.getValue())
+                );
+                config.setHeaders(newHeaders);
+
+                return config;
+            }
+            return null;
+        });
+
+        Optional<ProducerConfig> result = dialog.showAndWait();
+        result.ifPresent(this::updateConfigInFile);
+    }
+
+    private TableView<Header> createHeadersTable(Map<String, String> headers) {
+        TableView<Header> table = new TableView<>();
+
+        TableColumn<Header, String> keyCol = new TableColumn<>("Chave");
+        keyCol.setCellValueFactory(data -> data.getValue().keyProperty());
+
+        TableColumn<Header, String> valueCol = new TableColumn<>("Valor");
+        valueCol.setCellValueFactory(data -> data.getValue().valueProperty());
+
+        table.getColumns().addAll(keyCol, valueCol);
+        headers.forEach((k, v) -> table.getItems().add(new Header(k, v)));
+
+        return table;
+    }
+
+    private void updateConfigInFile(ProducerConfig updatedConfig) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            List<ProducerConfig> configs = loadAllConfigs();
+
+            configs.replaceAll(c ->
+                    c.getName().equals(updatedConfig.getName()) ? updatedConfig : c
+            );
+
+            mapper.writeValue(new File(CONFIG_FILE), configs);
+        } catch (IOException ex) {
+            showAlert(Alert.AlertType.ERROR, "Erro", "Falha ao atualizar configuração");
+        }
     }
 
     private HBox getHBox(TextArea valueArea) {
@@ -699,8 +877,7 @@ public class KafkaApp extends Application {
 
             if (file.exists()) {
                 return mapper.readValue(file,
-                        new TypeReference<>() {
-                        });
+                        new TypeReference<List<ProducerConfig>>(){});
             }
         } catch (IOException ex) {
             // Arquivo corrompido ou inexistente
@@ -708,9 +885,27 @@ public class KafkaApp extends Application {
         return new ArrayList<>();
     }
 
-    private void initializeProducerConfigs(ComboBox<ProducerConfig> configCombo) {
-        List<ProducerConfig> configs = loadAllConfigs();
-        configCombo.getItems().addAll(configs);
+    private void initializeProducerConfigs(ComboBox<ProducerConfig> configCombo,
+                                           ProgressIndicator loadingIndicator) {
+        loadingIndicator.setVisible(true);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<ProducerConfig> configs = loadAllConfigs();
+                configs.sort(Comparator.comparing(ProducerConfig::getName));
+
+                Platform.runLater(() -> {
+                    configCombo.getItems().setAll(configs);
+                    loadingIndicator.setVisible(false);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    showAlert(Alert.AlertType.WARNING, "Aviso",
+                            "Não foi possível carregar as configurações salvas");
+                    loadingIndicator.setVisible(false);
+                });
+            }
+        });
     }
 
     public static void main(String[] args) {
