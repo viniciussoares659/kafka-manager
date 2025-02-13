@@ -7,6 +7,8 @@ import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -63,7 +65,7 @@ public class KafkaApp extends Application {
         Label kafkaLabel = new Label("Kafka Host:");
         TextField kafkaField = new TextField();
         kafkaField.setPromptText("Digite o endereço do servidor Kafka (e.g. localhost:9092)");
-        kafkaField.setText("localhost:29092");
+        kafkaField.setText("localhost:9092");
 
         Button connectButton = new Button("Conectar");
         Button cancelButton = new Button("Cancelar");
@@ -339,12 +341,37 @@ public class KafkaApp extends Application {
         ComboBox<String> topicComboBox = new ComboBox<>();
         topicComboBox.setEditable(true);
 
+        ObservableList<String> allTopics = FXCollections.observableArrayList();
+        topicComboBox.setItems(allTopics);
+        topicComboBox.setMaxWidth(Double.MAX_VALUE);
+
         CompletableFuture.runAsync(() -> {
             List<String> topics = fetchTopics(kafkaServer);
-            Platform.runLater(() -> topicComboBox.getItems().addAll(topics));
+            Platform.runLater(() -> {
+                allTopics.setAll(topics);
+                topicComboBox.setItems(allTopics);
+            });
         });
-
         topicComboBox.setMaxWidth(Double.MAX_VALUE);
+
+        topicComboBox.getEditor().textProperty().addListener((obs, oldValue, newValue) -> {
+            topicComboBox.getSelectionModel().clearSelection();
+            // Se o campo estiver vazio, exibe todos os tópicos
+            if (newValue == null || newValue.isEmpty()) {
+                topicComboBox.setItems(allTopics);
+                topicComboBox.hide(); // Esconde para atualizar a lista
+                topicComboBox.show(); // Mostra novamente
+            } else {
+                final String userInput = newValue.toLowerCase();
+                // Filtra a lista completa conforme o input
+                List<String> filtered = allTopics.stream()
+                        .filter(topic -> topic.toLowerCase().contains(userInput))
+                        .collect(Collectors.toList());
+                topicComboBox.setItems(FXCollections.observableArrayList(filtered));
+                topicComboBox.hide();
+                topicComboBox.show();
+            }
+        });
 
         Label keyLabel = new Label("Chave:");
         TextField keyField = new TextField();
