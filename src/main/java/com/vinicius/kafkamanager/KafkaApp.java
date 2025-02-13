@@ -39,6 +39,7 @@ import java.util.stream.Collectors;
 public class KafkaApp extends Application {
 
     private static final String CONFIG_FILE = "producer_configs.json";
+    private static final String HOSTS_FILE = "hosts.json";
 
     private CompletableFuture<Void> connectionFuture;
 
@@ -63,9 +64,14 @@ public class KafkaApp extends Application {
         kafkaIcon.setPreserveRatio(true);
 
         Label kafkaLabel = new Label("Kafka Host:");
-        TextField kafkaField = new TextField();
+        ComboBox<String> kafkaField = new ComboBox<>();
+        kafkaField.setEditable(true);
         kafkaField.setPromptText("Digite o endereço do servidor Kafka (e.g. localhost:9092)");
-        kafkaField.setText("localhost:9092");
+
+        List<String> savedHosts = loadHosts();
+        kafkaField.getItems().addAll(savedHosts);
+
+        kafkaField.setValue("localhost:9092");
 
         Button connectButton = new Button("Conectar");
         Button cancelButton = new Button("Cancelar");
@@ -82,7 +88,7 @@ public class KafkaApp extends Application {
         loader.setVisible(false);
 
         connectButton.setOnAction(e -> {
-            String kafkaServer = kafkaField.getText();
+            String kafkaServer = kafkaField.getEditor().getText();
             connectButton.setDisable(true);
             cancelButton.setDisable(false);
             loader.setVisible(true);
@@ -95,6 +101,12 @@ public class KafkaApp extends Application {
                             loader.setVisible(false);
 
                             if (isConnected) {
+                                saveHost(kafkaServer);
+
+                                if (!kafkaField.getItems().contains(kafkaServer)) {
+                                    kafkaField.getItems().add(kafkaServer);
+                                }
+
                                 openTopicListView(kafkaServer, primaryStage);
                             } else {
                                 showAlert(Alert.AlertType.ERROR, "Erro na Conexão", "Falha ao conectar ao servidor Kafka.");
@@ -738,6 +750,33 @@ public class KafkaApp extends Application {
     private void initializeProducerConfigs(ComboBox<ProducerConfig> configCombo) {
         List<ProducerConfig> configs = loadAllConfigs();
         configCombo.getItems().addAll(configs);
+    }
+
+    private List<String> loadHosts() {
+        try {
+            File file = new File(HOSTS_FILE);
+            if (!file.exists()) {
+                return new ArrayList<>();
+            }
+            ObjectMapper mapper = new ObjectMapper();
+            return mapper.readValue(file, new TypeReference<List<String>>() {});
+        } catch (IOException e) {
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
+    }
+
+    private void saveHost(String host) {
+        try {
+            List<String> hosts = loadHosts();
+            if (!hosts.contains(host)) {
+                hosts.add(host);
+                ObjectMapper mapper = new ObjectMapper();
+                mapper.writeValue(new File(HOSTS_FILE), hosts);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public static void main(String[] args) {
